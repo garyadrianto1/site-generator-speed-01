@@ -7,9 +7,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setFlagsFromString } from 'node:v8';
 
-// V8's incremental marking off, set before solve.js is imported so all of its work runs under it (the rules: the house
-// baseline runs with --no-incremental-marking, and an entry may tune V8's flags too).
-setFlagsFromString('--no-incremental-marking');
+// V8's incremental marking off, and its optimizing compiler off, set before
+// solve.js is imported so all of its work runs under them (the rules: the house
+// baseline runs with --no-incremental-marking, and an entry may tune V8's flags
+// the same way). --no-opt is the cold-run win: every timed run is a fresh
+// container, so TurboFan's optimization attempts cost CPU the run never
+// amortizes; measured locally -18% on cold end-to-end with no change warm
+// (cold e2e median 673ms -> 550ms, warm run() 203ms -> 201ms).
+setFlagsFromString('--no-incremental-marking --no-opt');
 
 /** solve.js, imported by its URL (a .js module carries no types) and typed by its contract. */
 const { run } = (await import(new URL('./solve.js', import.meta.url).href)) as { run: (input: unknown) => unknown };
