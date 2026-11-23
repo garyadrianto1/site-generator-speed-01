@@ -436,6 +436,11 @@ function renderMarkdown(bodyLines, link) {
   const toc = [];
   let excerpt = null;
   const n = bodyLines.length;
+  // Word count, fused into this pass: one scan of the body's lines. A word
+  // run cannot span lines ('\n' is whitespace), so the per-line counts sum
+  // to wordsOf(bodyText) exactly; the joined bodyText itself is never built.
+  let words = 0;
+  for (let k = 0; k < n; k++) words += wordsOf(bodyLines[k]);
   let i = 0;
   while (i < n) {
     const line = bodyLines[i];
@@ -556,7 +561,7 @@ function renderMarkdown(bodyLines, link) {
       out.push('</p>', '\n');
     }
   }
-  return { html: out.join(''), toc, excerpt: excerpt ?? '' };
+  return { html: out.join(''), toc, excerpt: excerpt ?? '', words };
 }
 
 // ---------------------------------------------------------------- templates
@@ -839,14 +844,16 @@ function cardOf(s) {
     date_long: s.data.date === undefined ? '' : longDate(s.data.date),
     summary: s.data.summary ?? '',
     excerpt: s.excerpt,
-    reading_minutes: Math.max(1, Math.ceil(wordsOf(s.bodyText) / 200)),
+    reading_minutes: Math.max(1, Math.ceil(s.wordCount / 200)),
     tags: s.tagRefs.map((t) => ({ name: t.name, slug: t.slug, url: t.url })),
   };
 }
 
 /** A page as its layout reads it. */
 function pageOf(s) {
-  const c = cardOf(s);
+  // A shallow copy of the cached card: the page's own fields land on the
+  // copy, so the card the lists show is never mutated.
+  const c = Object.assign({}, s.card);
   c.slug = s.slug;
   c.content = s.html;
   c.toc = s.toc.map((h) => ({ level: h.level, id: h.id, html: h.html }));
@@ -896,7 +903,6 @@ export function run(input) {
     }
     s.data = fm.data;
     s.bodyLines = fm.bodyLines;
-    s.bodyText = fm.bodyLines.join('\n');
     s.post = s.path.startsWith('posts/');
     let own = null;
     if (s.path.startsWith('tags/')) own = 'tags';
@@ -968,6 +974,7 @@ export function run(input) {
     s.html = md.html;
     s.toc = md.toc;
     s.excerpt = md.excerpt;
+    s.wordCount = md.words;
   }
 
   // Collections: posts newest first, equal dates by slug; each post's neighbours.
@@ -1011,7 +1018,10 @@ export function run(input) {
   const tags = [...bySlug.values()].sort((x, y) => y.posts.length - x.posts.length || byCodeUnits(x.slug, y.slug));
 
   // Layouts: every page through its layout, the index pages, the tag pages, the tags page, then statics.
-  const cards = new Map(posts.map((p) => [p, cardOf(p)]));
+  // One card per kept source, built once: pageOf reuses it instead of
+  // recomputing longDate / word count / tag refs a second time.
+  for (const s of kept) s.card = cardOf(s);
+  const cards = new Map(posts.map((p) => [p, p.card]));
   const rootVars = {
     site: { title: site.title, base_url: base },
     tags: tags.map((t) => ({ name: t.name, slug: t.slug, url: t.url, count: t.posts.length })),
